@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aktepe Su Arıtma - Kontrol Paneli</title>
+<script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1a3a5c 0%, #0d7377 100%);
+    padding: 16px;
+    min-height: 100vh;
+  }
+
+  .header {
+    background: white;
+    padding: 16px 20px;
+    border-radius: 14px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-left h1 { color: #1a3a5c; font-size: 1.4em; }
+  .header-left p  { color: #666; font-size: 0.82em; margin-top: 2px; }
+
+  .status-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 0.82em;
+  }
+  .badge-ok   { background: #d4edda; color: #155724; }
+  .badge-err  { background: #f8d7da; color: #721c24; }
+  .badge-warn { background: #fff3cd; color: #856404; }
+  .badge-info { background: #cce5ff; color: #004085; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .card {
+    background: white;
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+
+  .card-title {
+    font-size: 1em;
+    font-weight: bold;
+    color: #1a3a5c;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e8f4f8;
+  }
+
+  /* Durum kartı */
+  .durum-display {
+    text-align: center;
+    padding: 18px 10px;
+    border-radius: 10px;
+    font-size: 1.5em;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .durum-BEKLE    { background: #e8f4f8; color: #1a3a5c; }
+  .durum-CALISMA  { background: #d4edda; color: #155724; }
+  .durum-ARIZA    { background: #f8d7da; color: #721c24; }
+  .durum-DUR      { background: #fff3cd; color: #856404; }
+
+  .kalan-sure {
+    text-align: center;
+    font-size: 0.88em;
+    color: #555;
+    margin-top: 6px;
+  }
+
+  /* Kontrol butonları */
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .btn {
+    flex: 1;
+    min-width: 80px;
+    padding: 11px 8px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.88em;
+    transition: all 0.2s;
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-start  { background: #28a745; color: white; }
+  .btn-stop   { background: #dc3545; color: white; }
+  .btn-reset  { background: #fd7e14; color: white; }
+  .btn-ters   { background: #6f42c1; color: white; }
+
+  /* Ölçüm kartı */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .metric-box {
+    background: linear-gradient(135deg, #1a3a5c 0%, #0d7377 100%);
+    border-radius: 10px;
+    padding: 14px 10px;
+    text-align: center;
+    color: white;
+  }
+  .metric-box.sicak-motor { background: linear-gradient(135deg, #e55d4a 0%, #c0392b 100%); }
+  .metric-box.sicak-deniz { background: linear-gradient(135deg, #2980b9 0%, #1a5276 100%); }
+  .metric-box.debi-box    { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
+  .metric-box.toplam-box  { background: linear-gradient(135deg, #8e44ad 0%, #6c3483 100%); }
+
+  .metric-label { font-size: 0.75em; opacity: 0.85; margin-bottom: 4px; }
+  .metric-value { font-size: 1.7em; font-weight: bold; font-family: monospace; }
+  .metric-unit  { font-size: 0.75em; opacity: 0.8; }
+
+  /* Depo göstergesi */
+  .depo-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .depo-item { }
+  .depo-label-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 4px;
+  }
+
+  .progress-bar {
+    height: 18px;
+    background: #e9ecef;
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 9px;
+    transition: width 0.6s ease;
+    background: linear-gradient(90deg, #0d7377, #1a3a5c);
+  }
+  .progress-fill.warn  { background: linear-gradient(90deg, #f39c12, #e67e22); }
+  .progress-fill.full  { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+
+  .depo-total {
+    text-align: center;
+    font-size: 1em;
+    font-weight: bold;
+    color: #1a3a5c;
+    padding: 8px;
+    background: #e8f4f8;
+    border-radius: 8px;
+    margin-top: 4px;
+  }
+
+  /* Basınç göstergesi */
+  .basinc-display {
+    text-align: center;
+    padding: 16px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #1a3a5c, #0d7377);
+    color: white;
+    margin-bottom: 10px;
+  }
+  .basinc-value { font-size: 3em; font-weight: bold; font-family: monospace; }
+  .basinc-unit  { font-size: 0.9em; opacity: 0.8; }
+
+  .basinc-zone {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .zone-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.78em;
+    font-weight: bold;
+    background: #e8f4f8;
+    color: #555;
+    border: 2px solid transparent;
+  }
+  .zone-badge.aktif { border-color: #0d7377; background: #d4edda; color: #155724; }
+  .zone-badge.asiri { border-color: #e74c3c; background: #f8d7da; color: #721c24; }
+
+  .footer {
+    background: rgba(255,255,255,0.15);
+    padding: 12px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 0.8em;
+    color: rgba(255,255,255,0.8);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>💧 Aktepe Su Arıtma</h1>
+    <p>MiRDEV Otomasyon — AnKA GLC Ex v2.5</p>
+  </div>
+  <div class="status-row">
+    <div id="web-status"  class="badge badge-err">Web: Bağlanıyor...</div>
+    <div id="anka-status" class="badge badge-err">Cihaz: Offline</div>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- DURUM + KONTROL -->
+  <div class="card">
+    <div class="card-title">📡 Sistem Durumu</div>
+    <div id="durum-display" class="durum-display durum-BEKLE">BEKLE</div>
+    <div id="kalan-sure" class="kalan-sure">—</div>
+    <div class="btn-row">
+      <button class="btn btn-start" onclick="gonderKomut('START')">▶ START</button>
+      <button class="btn btn-stop"  onclick="gonderKomut('STOP')">⏹ STOP</button>
+      <button class="btn btn-reset" onclick="gonderKomut('RESET')">↺ RESET</button>
+      <button class="btn btn-ters"  onclick="gonderKomut('TERS')">🔄 TERS</button>
+    </div>
+  </div>
+
+  <!-- BASINÇ -->
+  <div class="card">
+    <div class="card-title">🔵 Basınç</div>
+    <div class="basinc-display">
+      <div class="basinc-value" id="basinc-val">—</div>
+      <div class="basinc-unit">bar</div>
+    </div>
+    <div class="basinc-zone">
+      <span class="zone-badge" id="zone-hizli-kis">HIZLI KIS</span>
+      <span class="zone-badge" id="zone-yavas-kis">YAVAŞ KIS</span>
+      <span class="zone-badge" id="zone-sabit">SABİT</span>
+      <span class="zone-badge" id="zone-yavas-ac">YAVAŞ AÇ</span>
+      <span class="zone-badge" id="zone-hizli-ac">HIZLI AÇ</span>
+      <span class="zone-badge" id="zone-asiri">AŞIRI ⚠</span>
+    </div>
+  </div>
+
+  <!-- SICAKLIKLAR -->
+  <div class="card">
+    <div class="card-title">🌡️ Sıcaklıklar</div>
+    <div class="metric-grid">
+      <div class="metric-box sicak-motor">
+        <div class="metric-label">Motor (GP13)</div>
+        <div class="metric-value" id="t-motor">--</div>
+        <div class="metric-unit">°C</div>
+      </div>
+      <div class="metric-box sicak-deniz">
+        <div class="metric-label">Deniz (GP22)</div>
+        <div class="metric-value" id="t-deniz">--</div>
+        <div class="metric-unit">°C</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEBİ -->
+  <div class="card">
+    <div class="card-title">💧 Debi</div>
+    <div class="metric-grid">
+      <div class="metric-box debi-box">
+        <div class="metric-label">Anlık Debi</div>
+        <div class="metric-value" id="debi-val">--</div>
+        <div class="metric-unit">L/saat</div>
+      </div>
+      <div class="metric-box toplam-box">
+        <div class="metric-label">Toplam</div>
+        <div class="metric-value" id="toplam-val">--</div>
+        <div class="metric-unit">Litre</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEPO SEVİYELERİ -->
+  <div class="card">
+    <div class="card-title">🪣 Depo Seviyeleri</div>
+    <div class="depo-row">
+      <div class="depo-item">
+        <div class="depo-label-row">
+          <span>Depo P</span>
+          <span id="dep-p-label">-- / 375 L</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="dep-p-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="depo-item">
+        <div class="depo-label-row">
+          <span>Depo K</span>
+          <span id="dep-k-label">-- / 490 L</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="dep-k-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="depo-total" id="dep-toplam">Toplam: — / 865 L</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  🔒 HiveMQ Cloud — MiRDEV Otomasyon & Teknoloji Yazılımları
+</div>
+
+<script>
+const MQTT_BROKER = 'wss://eeba8f0754464022915172f8002f3004.s1.eu.hivemq.cloud:8884/mqtt';
+const MQTT_USER   = 'engin';
+const MQTT_PASS   = 'Engin.53';
+
+const TOPIC_DURUM    = 'aktepe/durum';
+const TOPIC_BASINC   = 'aktepe/basinc';
+const TOPIC_SICAKLIK = 'aktepe/sicaklik';
+const TOPIC_DEBI     = 'aktepe/debi';
+const TOPIC_DEPO     = 'aktepe/depo';
+const TOPIC_KOMUT    = 'aktepe/komut';
+
+// Basınç bölge sınırları (v2.5 sabitleriyle aynı)
+const HIZLI_KIS = 52.0, YAVAS_KIS = 57.0, SABIT_ALT = 57.0,
+      SABIT_UST = 59.0, YAVAS_AC  = 59.5, HIZLI_AC  = 60.5, ASIRI = 60.5;
+
+let client = null;
+let ankaCounter = 0;
+let ankaInterval = null;
+
+function getClientId() {
+  let id = localStorage.getItem('aktepe_client_id');
+  if (!id) {
+    id = 'aktepe_web_' + Date.now().toString(36) + Math.random().toString(36).substr(2,8);
+    localStorage.setItem('aktepe_client_id', id);
+  }
+  return id;
+}
+
+function connectMQTT() {
+  client = mqtt.connect(MQTT_BROKER, {
+    clientId: getClientId(),
+    clean: true,
+    username: MQTT_USER,
+    password: MQTT_PASS
+  });
+
+  client.on('connect', function() {
+    setWebStatus(true);
+    [TOPIC_DURUM, TOPIC_BASINC, TOPIC_SICAKLIK, TOPIC_DEBI, TOPIC_DEPO].forEach(t => {
+      client.subscribe(t, err => { if (!err) console.log('Abone:', t); });
+    });
+    if (ankaInterval) clearInterval(ankaInterval);
+    ankaInterval = setInterval(checkAnka, 1000);
+  });
+
+  client.on('message', function(topic, message) {
+    const msg = message.toString();
+    ankaCounter = 0;
+    setAnkaStatus(true);
+
+    if (topic === TOPIC_DURUM)    updateDurum(msg);
+    else if (topic === TOPIC_BASINC)   updateBasinc(msg);
+    else if (topic === TOPIC_SICAKLIK) updateSicaklik(msg);
+    else if (topic === TOPIC_DEBI)     updateDebi(msg);
+    else if (topic === TOPIC_DEPO)     updateDepo(msg);
+  });
+
+  client.on('error', e => { console.error('MQTT hata:', e); setWebStatus(false); });
+  client.on('close', () => { setWebStatus(false); setTimeout(connectMQTT, 3000); });
+}
+
+function checkAnka() {
+  ankaCounter++;
+  if (ankaCounter >= 30) { ankaCounter = 0; setAnkaStatus(false); }
+}
+
+function setWebStatus(ok) {
+  const el = document.getElementById('web-status');
+  el.textContent = ok ? 'Web: Bağlı ✅' : 'Web: Bağlantı Yok ❌';
+  el.className = 'badge ' + (ok ? 'badge-ok' : 'badge-err');
+}
+
+function setAnkaStatus(ok) {
+  const el = document.getElementById('anka-status');
+  el.textContent = ok ? 'Cihaz: Online ✅' : 'Cihaz: Offline ❌';
+  el.className = 'badge ' + (ok ? 'badge-ok' : 'badge-err');
+}
+
+function updateDurum(msg) {
+  const el  = document.getElementById('durum-display');
+  const kal = document.getElementById('kalan-sure');
+
+  let cls = 'durum-BEKLE', text = msg;
+  if (msg.startsWith('CALISMA')) {
+    cls = 'durum-CALISMA';
+    const m = msg.match(/(\d+)dk/);
+    if (m) { text = 'ÇALIŞIYOR'; kal.textContent = 'Kalan: ' + m[1] + ' dakika'; }
+    else    { text = 'ÇALIŞIYOR'; kal.textContent = ''; }
+  } else if (msg.startsWith('ARIZA')) {
+    cls = 'durum-ARIZA'; text = msg.replace('ARIZA:', '⚠ '); kal.textContent = '';
+  } else if (msg.startsWith('DUR')) {
+    cls = 'durum-DUR'; text = msg.replace('DUR:', ''); kal.textContent = '';
+  } else if (msg === 'BEKLE') {
+    kal.textContent = '';
+  }
+  el.className = 'durum-display ' + cls;
+  el.textContent = text;
+}
+
+function updateBasinc(msg) {
+  const bar = parseFloat(msg);
+  document.getElementById('basinc-val').textContent = isNaN(bar) ? '--' : bar.toFixed(1);
+
+  const zones = [
+    { id: 'zone-hizli-kis', min: 0,       max: HIZLI_KIS  },
+    { id: 'zone-yavas-kis', min: HIZLI_KIS, max: YAVAS_KIS },
+    { id: 'zone-sabit',     min: YAVAS_KIS, max: SABIT_UST },
+    { id: 'zone-yavas-ac',  min: SABIT_UST, max: YAVAS_AC  },
+    { id: 'zone-hizli-ac',  min: YAVAS_AC,  max: HIZLI_AC  },
+    { id: 'zone-asiri',     min: ASIRI,     max: 999       },
+  ];
+  zones.forEach(z => {
+    const el = document.getElementById(z.id);
+    const aktif = !isNaN(bar) && bar >= z.min && bar < z.max;
+    el.className = 'zone-badge' + (aktif ? (z.id === 'zone-asiri' ? ' asiri' : ' aktif') : '');
+  });
+}
+
+function updateSicaklik(msg) {
+  const p = msg.split(',');
+  document.getElementById('t-motor').textContent = p[0] || '--';
+  document.getElementById('t-deniz').textContent = p[1] || '--';
+}
+
+function updateDebi(msg) {
+  const p = msg.split(',');
+  document.getElementById('debi-val').textContent   = p[0] || '--';
+  document.getElementById('toplam-val').textContent = p[1] || '--';
+}
+
+function updateDepo(msg) {
+  const p = msg.split(',');
+  const lp = parseFloat(p[0]) || 0;
+  const lk = parseFloat(p[1]) || 0;
+  const lt = parseFloat(p[2]) || 0;
+
+  const pct_p = Math.min(100, (lp / 375) * 100);
+  const pct_k = Math.min(100, (lk / 490) * 100);
+  const pct_t = Math.min(100, (lt / 865) * 100);
+
+  document.getElementById('dep-p-label').textContent = lp + ' / 375 L';
+  document.getElementById('dep-k-label').textContent = lk + ' / 490 L';
+  document.getElementById('dep-toplam').textContent  = 'Toplam: ' + lt + ' / 865 L';
+
+  const pb = document.getElementById('dep-p-bar');
+  pb.style.width = pct_p + '%';
+  pb.className = 'progress-fill' + (pct_p > 90 ? ' full' : pct_p > 70 ? ' warn' : '');
+
+  const kb = document.getElementById('dep-k-bar');
+  kb.style.width = pct_k + '%';
+  kb.className = 'progress-fill' + (pct_k > 90 ? ' full' : pct_k > 70 ? ' warn' : '');
+}
+
+function gonderKomut(komut) {
+  if (!client || !client.connected) { alert('MQTT bağlantısı yok!'); return; }
+  client.publish(TOPIC_KOMUT, komut, { retain: false }, err => {
+    if (err) console.error('Komut gönderim hatası:', err);
+    else console.log('Komut gönderildi:', komut);
+  });
+}
+
+window.addEventListener('load', connectMQTT);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) location.reload(); });
+window.addEventListener('beforeunload', () => { if (client) client.end(true); });
+</script>
+
+</body>
+</html>
