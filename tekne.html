@@ -20,8 +20,11 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 #st{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .dot{width:10px;height:10px;border-radius:50%;background:#888}
 .dot.ok{background:var(--on)}.dot.bad{background:#d9534f}.dot.wait{background:var(--warn)}
-.r{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.r button{padding:16px 0;border:0;border-radius:10px;background:var(--btn);color:var(--fg);font-size:16px}
+.r{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.r button{display:flex;align-items:center;gap:8px;min-height:54px;padding:10px 12px;border:0;border-radius:10px;background:var(--btn);color:var(--fg);font-size:15px;text-align:left}
+.r button small{opacity:.6;font-size:13px;min-width:18px}
+.r.edit button{outline:2px dashed var(--warn)}
+.ed{width:100%;margin-top:8px;padding:10px;border:1px solid var(--btn);border-radius:10px;background:none;color:var(--muted);font-size:14px}
 .r button.on{background:var(--on)}
 .r button:disabled{opacity:.4}
 .alloff{width:100%;margin-top:10px;padding:12px;border:0;border-radius:10px;background:var(--off);color:#fff;font-size:15px}
@@ -55,6 +58,7 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 <h2>Röleler</h2>
 <div class="r" id="rl"></div>
 <button class="alloff" onclick="askOff()">Tümünü kapat</button>
+<button class="ed" id="edb" onclick="edT()">İsimleri düzenle</button>
 <div id="cfm">
   <button style="background:var(--off);color:#fff" onclick="allOff()">Evet, kapat</button>
   <button style="background:var(--btn);color:var(--fg)" onclick="hideCfm()">Vazgeç</button>
@@ -88,7 +92,9 @@ const F=[["depth","Derinlik","m"],["stw","Hız (su)","kn"],["sog","Hız (GPS)","
 const nav=document.getElementById('nav');
 F.forEach(f=>{nav.innerHTML+=`<div class="c${f[0]==='pos'?' wide':''}"><small>${f[1]}</small><b id="v_${f[0]}">--</b> ${f[2]}</div>`});
 const rl=document.getElementById('rl');
-for(let i=1;i<=16;i++){rl.innerHTML+=`<button id="b${i}" onclick="tg(${i})" disabled>${i}</button>`}
+for(let i=1;i<=16;i++){rl.innerHTML+=`<button id="b${i}" onclick="tg(${i})" disabled><small>${i}</small><span id="n${i}">Röle ${i}</span></button>`}
+let ed=false,names=[];
+function edT(){ed=!ed;document.getElementById('edb').textContent=ed?'Bitti':'İsimleri düzenle';rl.classList.toggle('edit',ed)}
 
 let cli=null,dev="?",lastData=0;
 function cfg(){try{return Object.assign({},DEF,JSON.parse(localStorage.getItem('tekneCfg')||'{}'))}catch(e){return Object.assign({},DEF)}}
@@ -121,10 +127,15 @@ function update(){
 setInterval(update,3000);
 function show(d){
   if(d.r)d.r.forEach((s,i)=>document.getElementById('b'+(i+1)).className=s?'on':'');
+  if(d.n){names=d.n;d.n.forEach((n,i)=>document.getElementById('n'+(i+1)).textContent=n||('Röle '+(i+1)))}
   F.forEach(f=>{const v=d[f[0]];document.getElementById('v_'+f[0]).textContent=(v===null||v===undefined)?'--':v});
   update();
 }
-function tg(i){if(cli&&cli.connected)cli.publish(T_SET,String(i))}
+function tg(i){
+  if(!cli||!cli.connected)return;
+  if(ed){const n=prompt('Röle '+i+' adı (boş bırakırsan numara görünür):',names[i-1]||'');
+    if(n!==null)cli.publish('tekne/panel/isim/set',i+'='+n.trim().slice(0,20));return}
+  cli.publish(T_SET,String(i))}
 function askOff(){document.getElementById('cfm').classList.add('show')}
 function hideCfm(){document.getElementById('cfm').classList.remove('show')}
 function allOff(){if(cli&&cli.connected)cli.publish(T_SET,'alloff');hideCfm()}
