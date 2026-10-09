@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tekne">
+<meta name="theme-color" content="#0b1622">
+<title>Tekne</title>
+<style>
+:root{--bg:#0b1622;--card:#14273a;--btn:#24384d;--fg:#e6edf3;--muted:#8fb3d9;--on:#1f9d55;--off:#7a2b2b;--warn:#c98a1a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,system-ui,sans-serif;
+ padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 16px)}
+h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.top h1{font-size:20px;margin:0}
+#st{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;background:#888}
+.dot.ok{background:var(--on)}.dot.bad{background:#d9534f}.dot.wait{background:var(--warn)}
+.r{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.r button{padding:16px 0;border:0;border-radius:10px;background:var(--btn);color:var(--fg);font-size:16px}
+.r button.on{background:var(--on)}
+.r button:disabled{opacity:.4}
+.alloff{width:100%;margin-top:10px;padding:12px;border:0;border-radius:10px;background:var(--off);color:#fff;font-size:15px}
+.g{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.c{background:var(--card);border-radius:10px;padding:10px}
+.c small{color:var(--muted);display:block;font-size:12px}
+.c b{font-size:22px;font-variant-numeric:tabular-nums}
+.c.wide{grid-column:1/-1}
+.link{background:none;border:1px solid var(--btn);color:var(--muted);border-radius:8px;padding:6px 10px;font-size:13px}
+#cfm{display:none;margin-top:10px;gap:8px}
+#cfm.show{display:flex}
+#cfm button{flex:1;padding:12px;border:0;border-radius:10px;font-size:15px}
+#set{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}
+#set.show{display:flex}
+.box{background:#1d3245;border-radius:14px;padding:18px;width:100%;max-width:420px}
+.box h3{margin:0 0 6px}.box p{margin:0 0 12px;color:var(--muted);font-size:14px}
+.box label{display:block;font-size:13px;margin:10px 0 4px}
+.box input{width:100%;padding:11px;border-radius:8px;border:1px solid #3a5268;background:#0f1d29;color:var(--fg);font-size:15px}
+.box .row{display:flex;gap:8px;margin-top:16px}
+.box .row button{flex:1;padding:12px;border:0;border-radius:10px;font-size:15px}
+#err{color:#ff8a80;font-size:13px;margin-top:8px;min-height:1em}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Tekne</h1>
+  <button class="link" onclick="openSet()">Ayarlar</button>
+</div>
+<div id="st"><span class="dot" id="dot"></span><span id="stt">Bağlanıyor...</span></div>
+
+<h2>Röleler</h2>
+<div class="r" id="rl"></div>
+<button class="alloff" onclick="askOff()">Tümünü kapat</button>
+<div id="cfm">
+  <button style="background:var(--off);color:#fff" onclick="allOff()">Evet, kapat</button>
+  <button style="background:var(--btn);color:var(--fg)" onclick="hideCfm()">Vazgeç</button>
+</div>
+
+<h2>Seyir verileri</h2>
+<div class="g" id="nav"></div>
+
+<div id="set">
+  <div class="box">
+    <h3>Bağlantı ayarları</h3>
+    <p>Su yapıcı panelindeki bilgilerle aynı. Bilgiler sadece bu telefonda saklanır.</p>
+    <label for="h">Broker adresi</label><input id="h" autocomplete="off">
+    <label for="u">Kullanıcı adı</label><input id="u" autocomplete="off">
+    <label for="p">Şifre</label><input id="p" type="password">
+    <div id="err"></div>
+    <div class="row">
+      <button style="background:var(--btn);color:var(--fg)" onclick="closeSet()">Vazgeç</button>
+      <button style="background:var(--on);color:#fff" onclick="saveSet()">Kaydet ve bağlan</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+const DEF={h:"eeba8f0754464022915172f8002f3004.s1.eu.hivemq.cloud",u:"engin",p:""};
+const T_DATA="tekne/panel/veri",T_STAT="tekne/panel/durum",T_SET="tekne/panel/role/set";
+const F=[["depth","Derinlik","m"],["stw","Hız (su)","kn"],["sog","Hız (GPS)","kn"],["cog","Rota (COG)","°"],
+["hdg","Pusula","°"],["aws","Görünür rüzgar","kn"],["awa","Görünür açı","°"],["tws","Gerçek rüzgar","kn"],
+["twa","Gerçek açı","°"],["wt","Su sıcaklığı","°C"],["bv","Akü","V"],["pos","Konum",""]];
+const nav=document.getElementById('nav');
+F.forEach(f=>{nav.innerHTML+=`<div class="c${f[0]==='pos'?' wide':''}"><small>${f[1]}</small><b id="v_${f[0]}">--</b> ${f[2]}</div>`});
+const rl=document.getElementById('rl');
+for(let i=1;i<=16;i++){rl.innerHTML+=`<button id="b${i}" onclick="tg(${i})" disabled>${i}</button>`}
+
+let cli=null,dev="?",lastData=0;
+function cfg(){try{return Object.assign({},DEF,JSON.parse(localStorage.getItem('tekneCfg')||'{}'))}catch(e){return Object.assign({},DEF)}}
+function setSt(cls,txt){document.getElementById('dot').className='dot '+cls;document.getElementById('stt').textContent=txt}
+function setBtns(on){for(let i=1;i<=16;i++)document.getElementById('b'+i).disabled=!on}
+
+function connect(){
+  const c=cfg();
+  if(!c.p){openSet();setSt('bad','Şifre girilmedi');return}
+  if(cli){try{cli.end(true)}catch(e){}}
+  setSt('wait','Bağlanıyor...');
+  cli=mqtt.connect(`wss://${c.h}:8884/mqtt`,{username:c.u,password:c.p,clientId:'tekne-web-'+Math.random().toString(16).slice(2,8),reconnectPeriod:4000,connectTimeout:10000});
+  cli.on('connect',()=>{cli.subscribe([T_DATA,T_STAT]);update()});
+  cli.on('message',(t,m)=>{
+    const s=m.toString();
+    if(t===T_STAT){dev=s;update();return}
+    try{const d=JSON.parse(s);lastData=Date.now();show(d)}catch(e){}
+  });
+  cli.on('error',e=>{if(/auth|Not authorized|Bad user/i.test(e.message)){setSt('bad','Şifre veya kullanıcı adı hatalı');cli.end(true);openSet()}});
+  cli.on('offline',()=>setSt('bad','İnternet bağlantısı yok'));
+  cli.on('reconnect',()=>setSt('wait','Yeniden bağlanıyor...'));
+}
+function update(){
+  if(!cli||!cli.connected)return;
+  const fresh=Date.now()-lastData<15000;
+  if(dev==='online'&&fresh){setSt('ok','Tekne çevrimiçi');setBtns(true)}
+  else if(dev==='offline'){setSt('bad','Tekne çevrimdışı');setBtns(false)}
+  else{setSt('wait','Tekneden veri bekleniyor...');setBtns(fresh)}
+}
+setInterval(update,3000);
+function show(d){
+  if(d.r)d.r.forEach((s,i)=>document.getElementById('b'+(i+1)).className=s?'on':'');
+  F.forEach(f=>{const v=d[f[0]];document.getElementById('v_'+f[0]).textContent=(v===null||v===undefined)?'--':v});
+  update();
+}
+function tg(i){if(cli&&cli.connected)cli.publish(T_SET,String(i))}
+function askOff(){document.getElementById('cfm').classList.add('show')}
+function hideCfm(){document.getElementById('cfm').classList.remove('show')}
+function allOff(){if(cli&&cli.connected)cli.publish(T_SET,'alloff');hideCfm()}
+function openSet(){const c=cfg();h.value=c.h;u.value=c.u;p.value=c.p;err.textContent='';document.getElementById('set').classList.add('show')}
+function closeSet(){document.getElementById('set').classList.remove('show')}
+function saveSet(){
+  if(!h.value.trim()||!u.value.trim()||!p.value){err.textContent='Üç alanı da doldur.';return}
+  try{localStorage.setItem('tekneCfg',JSON.stringify({h:h.value.trim(),u:u.value.trim(),p:p.value}))}catch(e){}
+  closeSet();connect();
+}
+connect();
+</script>
+</body>
+</html>
