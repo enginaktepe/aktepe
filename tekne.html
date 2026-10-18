@@ -46,6 +46,12 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 .box .row{display:flex;gap:8px;margin-top:16px}
 .box .row button{flex:1;padding:12px;border:0;border-radius:10px;font-size:15px}
 #err{color:#ff8a80;font-size:13px;margin-top:8px;min-height:1em}
+.c i{font-style:normal;color:var(--muted);font-size:13px;display:block;margin-top:2px}
+.c.alarm{outline:2px solid #d9534f}
+.h3{font-size:13px;color:var(--muted);margin:12px 0 6px}
+#vuy{display:none;margin-top:8px;padding:10px;border-radius:10px;background:#4a1f1f;color:#ffd6d6;font-size:14px}
+#vuy.show{display:block}
+#vbilgi{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
 </style>
 </head>
 <body>
@@ -67,6 +73,33 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 <h2>Seyir verileri</h2>
 <div class="g" id="nav"></div>
 
+<h2>Enerji</h2>
+<div id="vuy"></div>
+<div class="g">
+  <div class="c"><small>Akü</small><b id="e_v">--</b> V</div>
+  <div class="c"><small>Şarj</small><b id="e_soc">--</b> %</div>
+  <div class="c"><small>Akü akımı</small><b id="e_a">--</b> A<i id="e_yon"></i></div>
+  <div class="c"><small>Kalan süre</small><b id="e_ttg">--</b></div>
+  <div class="c"><small>Çekilen</small><b id="e_ah">--</b> Ah</div>
+  <div class="c" id="c_mv"><small id="e_auxad">Marş aküsü</small><b id="e_mv">--</b> <span id="e_auxbr">V</span></div>
+</div>
+<div class="h3">Giren / Çıkan</div>
+<div class="g">
+  <div class="c"><small>Giren</small><b id="e_gw">--</b> W<i id="e_ga">-- A</i></div>
+  <div class="c"><small>Tekne çıkan</small><b id="e_cw">--</b> W<i id="e_ca">-- A</i></div>
+  <div class="c"><small>Bugün üretim</small><b id="e_ur">--</b> Ah</div>
+  <div class="c"><small>Bugün tüketim</small><b id="e_tk">--</b> Ah</div>
+</div>
+<div class="h3">Kaynaklar</div>
+<div class="g">
+  <div class="c" id="c_m1"><small>MPPT 1 (100/50)</small><b id="e_w1">--</b> W<i id="e_m1">--</i></div>
+  <div class="c" id="c_m2"><small>MPPT 2 (250/100)</small><b id="e_w2">--</b> W<i id="e_m2">--</i></div>
+  <div class="c" id="c_sj"><small>Kara elektriği</small><b id="e_sw">--</b> W<i id="e_sj">--</i></div>
+  <div class="c"><small>Dinamo</small><b>--</b> W<i>ölçüm yok</i></div>
+  <div class="c wide" id="c_inv"><small>İnvertör</small><b id="e_iva">--</b> VA<i id="e_inv">--</i></div>
+</div>
+<div id="vbilgi">Victron verisi bekleniyor...</div>
+
 <div id="set">
   <div class="box">
     <h3>Bağlantı ayarları</h3>
@@ -85,7 +118,7 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 const DEF={h:"eeba8f0754464022915172f8002f3004.s1.eu.hivemq.cloud",u:"engin",p:""};
-const T_DATA="tekne/panel/veri",T_STAT="tekne/panel/durum",T_SET="tekne/panel/role/set";
+const T_DATA="tekne/panel/veri",T_STAT="tekne/panel/durum",T_SET="tekne/panel/role/set",T_VIC="tekne/victron/veri";
 const F=[["depth","Derinlik","m"],["stw","Hız (su)","kn"],["sog","Hız (GPS)","kn"],["cog","Rota (COG)","°"],
 ["hdg","Pusula","°"],["aws","Görünür rüzgar","kn"],["awa","Görünür açı","°"],["tws","Gerçek rüzgar","kn"],
 ["twa","Gerçek açı","°"],["wt","Su sıcaklığı","°C"],["bv","Akü","V"],["pos","Konum",""]];
@@ -107,10 +140,11 @@ function connect(){
   if(cli){try{cli.end(true)}catch(e){}}
   setSt('wait','Bağlanıyor...');
   cli=mqtt.connect(`wss://${c.h}:8884/mqtt`,{username:c.u,password:c.p,clientId:'tekne-web-'+Math.random().toString(16).slice(2,8),reconnectPeriod:4000,connectTimeout:10000});
-  cli.on('connect',()=>{cli.subscribe([T_DATA,T_STAT]);update()});
+  cli.on('connect',()=>{cli.subscribe([T_DATA,T_STAT,T_VIC]);update()});
   cli.on('message',(t,m)=>{
     const s=m.toString();
     if(t===T_STAT){dev=s;update();return}
+    if(t===T_VIC){try{vicGoster(JSON.parse(s))}catch(e){}return}
     try{const d=JSON.parse(s);lastData=Date.now();show(d)}catch(e){}
   });
   cli.on('error',e=>{if(/auth|Not authorized|Bad user/i.test(e.message)){setSt('bad','Şifre veya kullanıcı adı hatalı');cli.end(true);openSet()}});
@@ -146,6 +180,50 @@ function saveSet(){
   try{localStorage.setItem('tekneCfg',JSON.stringify({h:h.value.trim(),u:u.value.trim(),p:p.value}))}catch(e){}
   closeSet();connect();
 }
+// ---------- Enerji (Victron, ana modem S3) ----------
+const DURUM={0:"Kapalı",1:"Düşük güç",2:"ARIZA",3:"Bulk",4:"Absorption",5:"Float",6:"Storage",7:"Eşitleme",8:"Bypass",9:"Çalışıyor",10:"Yardım",11:"Güç kaynağı",245:"Başlıyor",246:"Tekrar absorption",247:"Oto eşitleme",248:"BatterySafe",252:"Dış kontrol"};
+let vicT=0;
+function E(id){return document.getElementById(id)}
+function sy(v,d){return (v===null||v===undefined||isNaN(v))?'--':Number(v).toFixed(d)}
+function dur(st){return DURUM[st]||'--'}
+function vicGoster(d){
+  vicT=Date.now();
+  const b=d.bmv,m1=d.m1,m2=d.m2,sj=d.sarj,inv=d.inv,e=d.enerji||{},uy=[];
+  E('e_v').textContent=sy(b&&b.v,2);
+  E('e_soc').textContent=sy(b&&b.soc,0);
+  E('e_a').textContent=sy(b&&b.a,1);
+  E('e_yon').textContent=!b||b.a==null?'':(b.a>0.2?'şarj oluyor':b.a<-0.2?'boşalıyor':'');
+  E('e_ttg').textContent=!b||b.ttg==null?'--':(b.ttg<0?'∞':Math.floor(b.ttg/60)+' sa '+(b.ttg%60)+' dk');
+  E('e_ah').textContent=sy(b&&b.ah,1);
+  const at=b?b.auxt:3;
+  E('e_auxad').textContent=at===1?'Orta nokta':at===2?'Akü sıcaklığı':'Marş aküsü';
+  E('e_auxbr').textContent=at===2?'°C':'V';
+  E('e_mv').textContent=at===3?'--':sy(b&&b.aux,at===2?1:2);
+  E('c_mv').classList.toggle('alarm',!!(b&&at===0&&b.aux!=null&&b.aux<11.8));
+  if(b&&at===0&&b.aux!=null&&b.aux<11.8)uy.push('Marş aküsü düşük: '+sy(b.aux,2)+' V');
+  E('e_gw').textContent=sy(e.gw,0);E('e_ga').textContent=sy(e.ga,1)+' A';
+  E('e_cw').textContent=sy(e.cw,0);E('e_ca').textContent=sy(e.ca,1)+' A';
+  E('e_ur').textContent=sy(e.ur,1);E('e_tk').textContent=sy(e.tk,1);
+  [[m1,'1'],[m2,'2']].forEach(([m,n])=>{
+    E('e_w'+n).textContent=sy(m&&m.w,0);
+    E('e_m'+n).textContent=m?(sy(m.a,1)+' A · '+dur(m.st)+' · bugün '+sy(m.wh,0)+' Wh'):'cihaz duyulmuyor';
+    E('c_m'+n).classList.toggle('alarm',!!(m&&m.er));
+    if(m&&m.er)uy.push('MPPT '+n+' hata kodu '+m.er);
+  });
+  E('e_sw').textContent=sy(e.sw,0);
+  E('e_sj').textContent=sj?(sy(sj.a,1)+' A · '+dur(sj.st)):'cihaz duyulmuyor';
+  E('c_sj').classList.toggle('alarm',!!(sj&&sj.er));
+  if(sj&&sj.er)uy.push('Şarj cihazı hata kodu '+sj.er);
+  E('e_iva').textContent=sy(inv&&inv.va,0);
+  E('e_inv').textContent=inv?(dur(inv.st)+' · AC '+sy(inv.acv,0)+' V '+sy(inv.aca,1)+' A'):'cihaz duyulmuyor';
+  E('c_inv').classList.toggle('alarm',!!(inv&&inv.al));
+  if(inv&&inv.al)uy.push('İnvertör uyarısı (kod '+inv.al+')');
+  if(b&&b.al)uy.push('BMV alarmı (kod '+b.al+')');
+  E('vuy').textContent=uy.join(' · ');E('vuy').classList.toggle('show',uy.length>0);
+  const yok=[['bmv','BMV'],['m1','MPPT 1'],['m2','MPPT 2'],['sarj','Şarj'],['inv','İnvertör']].filter(x=>!d[x[0]]).map(x=>x[1]);
+  E('vbilgi').textContent='Günlük sayaç: '+(e.gun||'--')+(yok.length?' · Duyulmayan: '+yok.join(', '):' · 5 cihazın hepsi duyuluyor');
+}
+setInterval(()=>{if(vicT&&Date.now()-vicT>30000)E('vbilgi').textContent='Victron verisi '+Math.round((Date.now()-vicT)/1000)+' sn\'dir gelmiyor (ana modem çevrimdışı olabilir)'},5000);
 connect();
 </script>
 </body>
