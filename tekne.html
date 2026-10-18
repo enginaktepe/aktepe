@@ -52,6 +52,11 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 #vuy{display:none;margin-top:8px;padding:10px;border-radius:10px;background:#4a1f1f;color:#ffd6d6;font-size:14px}
 #vuy.show{display:block}
 #vbilgi{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+#mrolay{font-size:12px;color:var(--muted);margin-top:6px;min-height:1em}
+#mcfm{display:none;margin-top:8px;padding:12px;border-radius:10px;background:#4a1f1f;color:#ffd6d6;font-size:14px}
+#mcfm.show{display:block}
+#mcfm .row{display:flex;gap:8px;margin-top:10px}
+#mcfm button{flex:1;padding:12px;border:0;border-radius:10px;font-size:15px}
 </style>
 </head>
 <body>
@@ -69,6 +74,19 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
   <button style="background:var(--off);color:#fff" onclick="allOff()">Evet, kapat</button>
   <button style="background:var(--btn);color:var(--fg)" onclick="hideCfm()">Vazgeç</button>
 </div>
+
+<h2>Ana modem röleleri</h2>
+<div class="r" id="mrl">
+  <button id="mb1" onclick="mtg(1)" disabled><small>1</small><span>Raymarine</span></button>
+  <button id="mb2" onclick="mtg(2)" disabled><small>2</small><span>Demir feneri</span></button>
+</div>
+<div id="mcfm"><b>Demir alarmı kurulu!</b><br>Raymarine kapanırsa GPS kesilir ve demir alarmı "GPS YOK" verir. Yine de kapatılsın mı?
+  <div class="row">
+    <button style="background:var(--off);color:#fff" onclick="mOnay()">Evet, kapat</button>
+    <button style="background:var(--btn);color:var(--fg)" onclick="mVazgec()">Vazgeç</button>
+  </div>
+</div>
+<div id="mrolay"></div>
 
 <h2>Seyir verileri</h2>
 <div class="g" id="nav"></div>
@@ -118,7 +136,7 @@ h2{font-size:16px;margin:18px 0 8px;color:var(--muted)}
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 const DEF={h:"eeba8f0754464022915172f8002f3004.s1.eu.hivemq.cloud",u:"engin",p:""};
-const T_DATA="tekne/panel/veri",T_STAT="tekne/panel/durum",T_SET="tekne/panel/role/set",T_VIC="tekne/victron/veri";
+const T_DATA="tekne/panel/veri",T_STAT="tekne/panel/durum",T_SET="tekne/panel/role/set",T_VIC="tekne/victron/veri",T_MR="tekne/modem/role",T_MRSET="tekne/modem/role/set";
 const F=[["depth","Derinlik","m"],["stw","Hız (su)","kn"],["sog","Hız (GPS)","kn"],["cog","Rota (COG)","°"],
 ["hdg","Pusula","°"],["aws","Görünür rüzgar","kn"],["awa","Görünür açı","°"],["tws","Gerçek rüzgar","kn"],
 ["twa","Gerçek açı","°"],["wt","Su sıcaklığı","°C"],["bv","Akü","V"],["pos","Konum",""]];
@@ -140,11 +158,12 @@ function connect(){
   if(cli){try{cli.end(true)}catch(e){}}
   setSt('wait','Bağlanıyor...');
   cli=mqtt.connect(`wss://${c.h}:8884/mqtt`,{username:c.u,password:c.p,clientId:'tekne-web-'+Math.random().toString(16).slice(2,8),reconnectPeriod:4000,connectTimeout:10000});
-  cli.on('connect',()=>{cli.subscribe([T_DATA,T_STAT,T_VIC]);update()});
+  cli.on('connect',()=>{cli.subscribe([T_DATA,T_STAT,T_VIC,T_MR]);update()});
   cli.on('message',(t,m)=>{
     const s=m.toString();
     if(t===T_STAT){dev=s;update();return}
     if(t===T_VIC){try{vicGoster(JSON.parse(s))}catch(e){}return}
+    if(t===T_MR){try{mrGoster(JSON.parse(s))}catch(e){}return}
     try{const d=JSON.parse(s);lastData=Date.now();show(d)}catch(e){}
   });
   cli.on('error',e=>{if(/auth|Not authorized|Bad user/i.test(e.message)){setSt('bad','Şifre veya kullanıcı adı hatalı');cli.end(true);openSet()}});
@@ -180,6 +199,23 @@ function saveSet(){
   try{localStorage.setItem('tekneCfg',JSON.stringify({h:h.value.trim(),u:u.value.trim(),p:p.value}))}catch(e){}
   closeSet();connect();
 }
+// ---------- Ana modem roleleri (S3) ----------
+let mr=null;
+function mrGoster(d){
+  mr=d;
+  [1,2].forEach(i=>{const b=document.getElementById('mb'+i);b.disabled=false;b.className=d.r&&d.r[i-1]?'on':'';
+    if(d.n&&d.n[i-1])b.querySelector('span').textContent=d.n[i-1]});
+  document.getElementById('mrolay').textContent=d.olay?('Son olay: '+d.olay):'';
+}
+function mtg(i){
+  if(!cli||!cli.connected||!mr)return;
+  const acik=mr.r&&mr.r[i-1];
+  if(i===1&&acik&&mr.dm){document.getElementById('mcfm').classList.add('show');return}
+  cli.publish(T_MRSET,i+'='+(acik?0:1));
+}
+function mOnay(){if(cli&&cli.connected)cli.publish(T_MRSET,'1=0=ONAY');mVazgec()}
+function mVazgec(){document.getElementById('mcfm').classList.remove('show')}
+
 // ---------- Enerji (Victron, ana modem S3) ----------
 const DURUM={0:"Kapalı",1:"Düşük güç",2:"ARIZA",3:"Bulk",4:"Absorption",5:"Float",6:"Storage",7:"Eşitleme",8:"Bypass",9:"Çalışıyor",10:"Yardım",11:"Güç kaynağı",245:"Başlıyor",246:"Tekrar absorption",247:"Oto eşitleme",248:"BatterySafe",252:"Dış kontrol"};
 let vicT=0;
